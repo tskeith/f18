@@ -61,7 +61,9 @@ public:
 
   const SourceName &symbolName() const { return *symbolName_; }
   // Set the GenericKind in this symbol and resolve the corresponding
-  // name if there is one
+  // name if there is one.  Parses of generic-specs are ambiguous vs.
+  // parses of other names, so if the symbol is not actually a generic,
+  // leave the symbol alone while still resolving the name.
   void Resolve(Symbol *);
 
 private:
