@@ -874,7 +874,7 @@ TYPE_PARSER(construct<TypeBoundProcDecl>(name, maybe("=>" >> name)))
 //        GENERIC [, access-spec] :: generic-spec => binding-name-list
 TYPE_CONTEXT_PARSER("type bound GENERIC statement"_en_US,
     construct<TypeBoundGenericStmt>("GENERIC" >> maybe("," >> accessSpec),
-        "::" >> indirect(genericSpec), "=>" >> listOfNames))
+        "::" >> genericSpec, "=>" >> listOfNames))
 
 // R752 bind-attr ->
 //        access-spec | DEFERRED | NON_OVERRIDABLE | NOPASS | PASS [(arg-name)]
@@ -1137,8 +1137,8 @@ TYPE_PARSER(construct<AccessStmt>(accessSpec,
             Parser<AccessId>{}))))
 
 // R828 access-id -> access-name | generic-spec
-TYPE_PARSER(construct<AccessId>(indirect(genericSpec)) ||
-    construct<AccessId>(name))  // initially ambiguous with genericSpec
+// N.B. bare names are parsed as generic-spec
+TYPE_PARSER(construct<AccessId>(genericSpec))
 
 // R829 allocatable-stmt -> ALLOCATABLE [::] allocatable-decl-list
 TYPE_PARSER(construct<AllocatableStmt>("ALLOCATABLE" >> maybe("::"_tok) >>
@@ -3126,9 +3126,8 @@ TYPE_PARSER(construct<Rename>("OPERATOR (" >>
 
 // R1412 only -> generic-spec | only-use-name | rename
 // R1413 only-use-name -> use-name
-TYPE_PARSER(construct<Only>(Parser<Rename>{}) ||
-    construct<Only>(indirect(genericSpec)) ||
-    construct<Only>(name))  // TODO: ambiguous, accepted by genericSpec
+// N.B. only-use-name is parsed as a generic-spec
+TYPE_PARSER(construct<Only>(Parser<Rename>{}) || construct<Only>(genericSpec))
 
 // R1416 submodule ->
 //         submodule-stmt [specification-part] [module-subprogram-part]

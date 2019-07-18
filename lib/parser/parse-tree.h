@@ -237,7 +237,6 @@ struct UseStmt;  // R1409
 struct Submodule;  // R1416
 struct BlockData;  // R1420
 struct InterfaceBlock;  // R1501
-struct GenericSpec;  // R1508
 struct GenericStmt;  // R1510
 struct ExternalStmt;  // R1511
 struct ProcedureDeclarationStmt;  // R1512
@@ -569,8 +568,8 @@ WRAPPER_CLASS(NamedConstant, Name);
 WRAPPER_CLASS(DefinedOpName, Name);
 
 // R608 intrinsic-operator ->
-//        ** | * | / | + | - | // | .LT. | .LE. | .EQ. | .NE. | .GE. | .GT. |
-//        .NOT. | .AND. | .OR. | .EQV. | .NEQV.
+//       power-op | mult-op | add-op | concat-op | rel-op |
+//       not-op | and-op | or-op | equiv-op
 // R609 defined-operator ->
 //        defined-unary-op | defined-binary-op | extended-intrinsic-op
 // R610 extended-intrinsic-op -> intrinsic-operator
@@ -1095,13 +1094,30 @@ struct TypeBoundProcedureStmt {
   std::variant<WithoutInterface, WithInterface> u;
 };
 
+// R1508 generic-spec ->
+//         generic-name | OPERATOR ( defined-operator ) |
+//         ASSIGNMENT ( = ) | defined-io-generic-spec
+// R1509 defined-io-generic-spec ->
+//         READ ( FORMATTED ) | READ ( UNFORMATTED ) |
+//         WRITE ( FORMATTED ) | WRITE ( UNFORMATTED )
+struct GenericSpec {
+  UNION_CLASS_BOILERPLATE(GenericSpec);
+  EMPTY_CLASS(Assignment);
+  EMPTY_CLASS(ReadFormatted);
+  EMPTY_CLASS(ReadUnformatted);
+  EMPTY_CLASS(WriteFormatted);
+  EMPTY_CLASS(WriteUnformatted);
+  CharBlock source;
+  std::variant<Name, DefinedOperator, Assignment, ReadFormatted,
+      ReadUnformatted, WriteFormatted, WriteUnformatted>
+      u;
+};
+
 // R751 type-bound-generic-stmt ->
 //        GENERIC [, access-spec] :: generic-spec => binding-name-list
 struct TypeBoundGenericStmt {
   TUPLE_CLASS_BOILERPLATE(TypeBoundGenericStmt);
-  std::tuple<std::optional<AccessSpec>, common::Indirection<GenericSpec>,
-      std::list<Name>>
-      t;
+  std::tuple<std::optional<AccessSpec>, GenericSpec, std::list<Name>> t;
 };
 
 // R753 final-procedure-stmt -> FINAL [::] final-subroutine-name-list
@@ -1339,10 +1355,7 @@ struct TypeDeclarationStmt {
 };
 
 // R828 access-id -> access-name | generic-spec
-struct AccessId {
-  UNION_CLASS_BOILERPLATE(AccessId);
-  std::variant<Name, common::Indirection<GenericSpec>> u;
-};
+WRAPPER_CLASS(AccessId, GenericSpec);
 
 // R827 access-stmt -> access-spec [[::] access-id-list]
 struct AccessStmt {
@@ -2903,25 +2916,6 @@ struct BlockData {
       t;
 };
 
-// R1508 generic-spec ->
-//         generic-name | OPERATOR ( defined-operator ) |
-//         ASSIGNMENT ( = ) | defined-io-generic-spec
-// R1509 defined-io-generic-spec ->
-//         READ ( FORMATTED ) | READ ( UNFORMATTED ) |
-//         WRITE ( FORMATTED ) | WRITE ( UNFORMATTED )
-struct GenericSpec {
-  UNION_CLASS_BOILERPLATE(GenericSpec);
-  EMPTY_CLASS(Assignment);
-  EMPTY_CLASS(ReadFormatted);
-  EMPTY_CLASS(ReadUnformatted);
-  EMPTY_CLASS(WriteFormatted);
-  EMPTY_CLASS(WriteUnformatted);
-  CharBlock source;
-  std::variant<Name, DefinedOperator, Assignment, ReadFormatted,
-      ReadUnformatted, WriteFormatted, WriteUnformatted>
-      u;
-};
-
 // R1510 generic-stmt ->
 //         GENERIC [, access-spec] :: generic-spec => specific-procedure-list
 struct GenericStmt {
@@ -2937,9 +2931,10 @@ struct InterfaceStmt {
 
 // R1412 only -> generic-spec | only-use-name | rename
 // R1413 only-use-name -> use-name
+// only-use-name is parsed as a generic-spec
 struct Only {
   UNION_CLASS_BOILERPLATE(Only);
-  std::variant<common::Indirection<GenericSpec>, Name, Rename> u;
+  std::variant<GenericSpec, Rename> u;
 };
 
 // R1409 use-stmt ->

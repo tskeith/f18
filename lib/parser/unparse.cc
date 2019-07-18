@@ -332,7 +332,7 @@ public:
   }
   void Unparse(const TypeBoundGenericStmt &x) {  // R751
     Word("GENERIC"), Walk(", ", std::get<std::optional<AccessSpec>>(x.t));
-    Put(" :: "), Walk(std::get<common::Indirection<GenericSpec>>(x.t));
+    Put(" :: "), Walk(std::get<GenericSpec>(x.t));
     Put(" => "), Walk(std::get<std::list<Name>>(x.t), ", ");
   }
   void Post(const BindAttr::Deferred &) { Word("DEFERRED"); }  // R752

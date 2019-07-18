@@ -1801,8 +1801,8 @@ void ScopeHandler::MakeExternal(Symbol &symbol) {
 bool ModuleVisitor::Pre(const parser::Only &x) {
   std::visit(
       common::visitors{
-          [&](const Indirection<parser::GenericSpec> &generic) {
-            auto info{GenericSpecInfo{generic.value()}};
+          [&](const parser::GenericSpec &generic) {
+            auto info{GenericSpecInfo{generic}};
             info.Resolve(AddUse(info.symbolName()));
           },
           [&](const parser::Name &name) { Resolve(name, AddUse(name.source)); },
@@ -3316,9 +3316,9 @@ void DeclarationVisitor::Post(const parser::FinalProcedureStmt &x) {
 
 bool DeclarationVisitor::Pre(const parser::TypeBoundGenericStmt &x) {
   const auto &accessSpec{std::get<std::optional<parser::AccessSpec>>(x.t)};
-  const auto &genericSpec{std::get<Indirection<parser::GenericSpec>>(x.t)};
+  const auto &genericSpec{std::get<parser::GenericSpec>(x.t)};
   const auto &bindingNames{std::get<std::list<parser::Name>>(x.t)};
-  auto info{GenericSpecInfo{genericSpec.value()}};
+  auto info{GenericSpecInfo{genericSpec}};
   const SourceName &symbolName{info.symbolName()};
   bool isPrivate{accessSpec ? accessSpec->v == parser::AccessSpec::Kind::Private
                             : derivedTypeInfo_.privateBindings};
@@ -4884,17 +4884,8 @@ bool ModuleVisitor::Pre(const parser::AccessStmt &x) {
     defaultAccess_ = accessAttr;
   } else {
     for (const auto &accessId : accessIds) {
-      std::visit(
-          common::visitors{
-              [=](const parser::Name &y) {
-                Resolve(y, SetAccess(y.source, accessAttr));
-              },
-              [=](const Indirection<parser::GenericSpec> &y) {
-                auto info{GenericSpecInfo{y.value()}};
-                info.Resolve(&SetAccess(info.symbolName(), accessAttr));
-              },
-          },
-          accessId.u);
+      auto info{GenericSpecInfo{accessId.v}};
+      info.Resolve(&SetAccess(info.symbolName(), accessAttr));
     }
   }
   return false;
