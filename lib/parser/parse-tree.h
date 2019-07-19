@@ -3693,6 +3693,7 @@ WRAPPER_CLASS(OmpEndDoSimd, std::optional<OmpNowait>);
 WRAPPER_CLASS(OmpEndDo, std::optional<OmpNowait>);
 struct OpenMPEndLoopDirective {
   UNION_CLASS_BOILERPLATE(OpenMPEndLoopDirective);
+  CharBlock source;
   std::variant<OmpEndDoSimd, OmpEndDo, OmpLoopDirective> u;
 };
 
@@ -3703,7 +3704,13 @@ struct OpenMPBlockConstruct {
 
 struct OpenMPLoopConstruct {
   TUPLE_CLASS_BOILERPLATE(OpenMPLoopConstruct);
-  std::tuple<OmpLoopDirective, OmpClauseList> t;
+  template<typename A, typename B, typename = common::NoLvalue<A>,
+      typename = common::NoLvalue<B>>
+  OpenMPLoopConstruct(A &&a, B &&b)
+    : t({std::move(a), std::move(b), std::nullopt, std::nullopt}) {}
+  std::tuple<OmpLoopDirective, OmpClauseList, std::optional<DoConstruct>,
+      std::optional<OpenMPEndLoopDirective>>
+      t;
 };
 
 struct OpenMPConstruct {

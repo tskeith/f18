@@ -137,6 +137,7 @@ set(ERROR_TESTS
   expr-errors01.f90
   null01.f90
   omp-clause-validity01.f90
+  omp-loop-association.f90
 #  omp-nested01.f90
   equivalence01.f90
   init01.f90
