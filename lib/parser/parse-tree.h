@@ -3704,9 +3704,7 @@ struct OpenMPBlockConstruct {
 
 struct OpenMPLoopConstruct {
   TUPLE_CLASS_BOILERPLATE(OpenMPLoopConstruct);
-  template<typename A, typename B, typename = common::NoLvalue<A>,
-      typename = common::NoLvalue<B>>
-  OpenMPLoopConstruct(A &&a, B &&b)
+  OpenMPLoopConstruct(OmpLoopDirective &&a, OmpClauseList &&b)
     : t({std::move(a), std::move(b), std::nullopt, std::nullopt}) {}
   std::tuple<OmpLoopDirective, OmpClauseList, std::optional<DoConstruct>,
       std::optional<OpenMPEndLoopDirective>>
