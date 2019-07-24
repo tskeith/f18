@@ -15,6 +15,7 @@
 add_library(FortranCommon
   default-kinds.cc
   idioms.cc
+  trace.cc  # TRACE
 )
 
 install (TARGETS FortranCommon
