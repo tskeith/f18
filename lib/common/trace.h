@@ -26,8 +26,10 @@ public:
   Tracer() {}
 
   template<typename... A>
-  void Trace(const char *file, int line, const char *format, A &&... args) {
-    return DoTrace(file, line, format, ToCString(std::forward<A>(args))...);
+  void Trace(const char *file, int line, const char *func,
+      const char *format = nullptr, A &&... args) {
+    return DoTrace(
+        file, line, func, format, ToCString(std::forward<A>(args))...);
   }
 
 private:
@@ -37,12 +39,13 @@ private:
     return ToCString(ss.str());
   }
   const char *ToCString(const std::string &);
-  void DoTrace(const char *, int, const char *, ...);
+  void DoTrace(const char *, int, const char *, const char *, ...);
 
   std::forward_list<std::string> conversions_;  // preserves created strings
 };
 
-#define TRACE(...) Fortran::common::Tracer{}.Trace(__FILE__, __LINE__, __VA_ARGS__)
+#define TRACE(...) \
+  Fortran::common::Tracer{}.Trace(__FILE__, __LINE__, __func__, __VA_ARGS__)
 
 }
 #endif

@@ -13,11 +13,11 @@
 // limitations under the License.
 
 #include "trace.h"
-#include <cstdio>
 #include <cstdarg>
+#include <cstdio>
 #include <cstring>
 
-//TRACE
+// TRACE
 namespace Fortran::common {
 
 const char *Tracer::ToCString(const std::string &s) {
@@ -25,14 +25,17 @@ const char *Tracer::ToCString(const std::string &s) {
   return conversions_.front().c_str();
 }
 
-void Tracer::DoTrace(const char *file, int line, const char *format, ...) {
+void Tracer::DoTrace(
+    const char *file, int line, const char *func, const char *format, ...) {
   const char *slash = std::strrchr(file, '/');
-  fprintf(stderr, "%s:%d: ", slash ? slash + 1 : file, line);
-  va_list ap;
-  va_start(ap, format);
-  vfprintf(stderr, format, ap);
-  va_end(ap);
-  fprintf(stderr, "\n");
+  fprintf(stderr, "%s:%d: %s\n", slash ? slash + 1 : file, line, func);
+  if (format) {
+    va_list ap;
+    va_start(ap, format);
+    vfprintf(stderr, format, ap);
+    va_end(ap);
+    fprintf(stderr, "\n");
+  }
 }
 
 }
