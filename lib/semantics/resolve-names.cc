@@ -432,6 +432,8 @@ public:
   // about a type; two names & locations
   void SayAlreadyDeclared(const SourceName &, Symbol &);
   void SayAlreadyDeclared(const parser::Name &, Symbol &);
+  void SayWithReason(
+      const parser::Name &, Symbol &, MessageFixedText &&, MessageFixedText &&);
   void SayWithDecl(const parser::Name &, Symbol &, MessageFixedText &&);
   void SayLocalMustBeVariable(const parser::Name &, Symbol &);
   void SayDerivedType(const SourceName &, MessageFixedText &&, const Scope &);
@@ -658,6 +660,7 @@ public:
   using ScopeHandler::Post;
   using ScopeHandler::Pre;
 
+  bool Pre(const parser::Initialization &);
   void Post(const parser::EntityDecl &);
   void Post(const parser::ObjectDecl &);
   void Post(const parser::PointerDecl &);
@@ -1526,12 +1529,17 @@ void ScopeHandler::SayAlreadyDeclared(const SourceName &name, Symbol &prev) {
   context().SetError(prev);
 }
 
+void ScopeHandler::SayWithReason(const parser::Name &name, Symbol &symbol,
+    MessageFixedText &&msg1, MessageFixedText &&msg2) {
+  Say2(name, std::move(msg1), symbol, std::move(msg2));
+  context().SetError(symbol, msg1.isFatal());
+}
+
 void ScopeHandler::SayWithDecl(
     const parser::Name &name, Symbol &symbol, MessageFixedText &&msg) {
-  Say2(name, std::move(msg), symbol,
+  SayWithReason(name, symbol, std::move(msg),
       symbol.test(Symbol::Flag::Implicit) ? "Implicit declaration of '%s'"_en_US
                                           : "Declaration of '%s'"_en_US);
-  context().SetError(symbol, msg.isFatal());
 }
 
 void ScopeHandler::SayLocalMustBeVariable(
@@ -2636,6 +2644,13 @@ void DeclarationVisitor::Post(const parser::CodimensionDecl &x) {
   DeclareObjectEntity(name, Attrs{});
 }
 
+bool DeclarationVisitor::Pre(const parser::Initialization &) {
+  // Defer inspection of initializers to Initialization() so that the
+  // symbol being initialized will be available within the initialization
+  // expression.
+  return false;
+}
+
 void DeclarationVisitor::Post(const parser::EntityDecl &x) {
   // TODO: may be under StructureStmt
   const auto &name{std::get<parser::ObjectName>(x.t)};
@@ -2677,8 +2692,8 @@ bool DeclarationVisitor::Pre(const parser::NamedConstantDef &x) {
     return false;
   }
   const auto &expr{std::get<parser::ConstantExpr>(x.t)};
-  Walk(expr);
   ApplyImplicitRules(symbol);
+  Walk(expr);
   if (auto converted{
           EvaluateConvertedExpr(symbol, expr, expr.thing.value().source)}) {
     symbol.get<ObjectEntityDetails>().set_init(std::move(*converted));
@@ -3796,9 +3811,6 @@ bool DeclarationVisitor::PassesSharedLocalityChecks(
 // Checks for locality-specs LOCAL and LOCAL_INIT
 bool DeclarationVisitor::PassesLocalityChecks(
     const parser::Name &name, Symbol &symbol) {
-  if (!PassesSharedLocalityChecks(name, symbol)) {
-    return false;
-  }
   if (IsAllocatable(symbol)) {  // C1128
     SayWithDecl(name, symbol,
         "ALLOCATABLE variable '%s' not allowed in a locality-spec"_err_en_US);
@@ -3838,8 +3850,15 @@ bool DeclarationVisitor::PassesLocalityChecks(
         "Assumed size array '%s' not allowed in a locality-spec"_err_en_US);
     return false;
   }
-  // TODO: Check to see if the name can appear in a variable definition context
-  return true;
+  if (std::optional<MessageFixedText> msg{
+          WhyNotModifiable(symbol, currScope())}) {
+    SayWithReason(name, symbol,
+        "'%s' may not appear in a locality-spec because it is not "
+        "definable"_err_en_US,
+        std::move(*msg));
+    return false;
+  }
+  return PassesSharedLocalityChecks(name, symbol);
 }
 
 Symbol &DeclarationVisitor::FindOrDeclareEnclosingEntity(
@@ -4424,14 +4443,6 @@ void ConstructVisitor::SetTypeFromAssociation(Symbol &symbol) {
   }
   if (pexpr->has_value()) {
     const SomeExpr &expr{**pexpr};
-    if (evaluate::IsVariable(expr)) {
-      if (const Symbol * varSymbol{evaluate::GetLastSymbol(expr)}) {
-        if (const DeclTypeSpec * type{varSymbol->GetType()}) {
-          symbol.SetType(*type);
-          return;
-        }
-      }
-    }
     if (std::optional<evaluate::DynamicType> type{expr.GetType()}) {
       if (const auto *charExpr{
               evaluate::UnwrapExpr<evaluate::Expr<evaluate::SomeCharacter>>(
@@ -4773,6 +4784,10 @@ void DeclarationVisitor::Initialization(const parser::Name &name,
   if (name.symbol == nullptr) {
     return;
   }
+  // Traversal of the initializer was deferred to here so that the
+  // symbol being declared can be available for e.g.
+  //   real, parameter :: x = tiny(x)
+  Walk(init.u);
   Symbol &ultimate{name.symbol->GetUltimate()};
   if (auto *details{ultimate.detailsIf<ObjectEntityDetails>()}) {
     // TODO: check C762 - all bounds and type parameters of component
