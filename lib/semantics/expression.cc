@@ -721,8 +721,7 @@ MaybeExpr ExpressionAnalyzer::Analyze(
           [&](auto &&ckExpr) -> MaybeExpr {
             using Result = ResultType<decltype(ckExpr)>;
             auto *cp{std::get_if<Constant<Result>>(&ckExpr.u)};
-            CHECK(cp != nullptr);  // the parent was parsed as a constant string
-            CHECK(cp->size() == 1);
+            CHECK(DEREF(cp).size() == 1);
             StaticDataObject::Pointer staticData{StaticDataObject::Create()};
             staticData->set_alignment(Result::kind)
                 .set_itemBytes(Result::kind)
@@ -1325,17 +1324,17 @@ MaybeExpr ExpressionAnalyzer::Analyze(
         } else if (symbol->has<semantics::ObjectEntityDetails>()) {
           // C1594(4)
           const auto &innermost{context_.FindScope(expr.source)};
-          if (const auto *pureFunc{
-                  semantics::FindPureFunctionContaining(&innermost)}) {
+          if (const auto *pureProc{
+                  semantics::FindPureProcedureContaining(&innermost)}) {
             if (const Symbol *
                 pointer{semantics::FindPointerComponent(*symbol)}) {
               if (const Symbol *
                   object{semantics::FindExternallyVisibleObject(
-                      *value, *pureFunc)}) {
+                      *value, *pureProc)}) {
                 if (auto *msg{Say(expr.source,
                         "Externally visible object '%s' must not be "
                         "associated with pointer component '%s' in a "
-                        "PURE function"_err_en_US,
+                        "PURE procedure"_err_en_US,
                         object->name(), pointer->name())}) {
                   msg->Attach(object->name(), "Object declaration"_en_US)
                       .Attach(pointer->name(), "Pointer declaration"_en_US);
@@ -2088,9 +2087,8 @@ MaybeExpr ExpressionAnalyzer::MakeFunctionRef(
             ProcedureRef{std::move(proc), std::move(arguments)}};
       } else {
         // Not a procedure pointer, so type and shape are known.
-        const auto *typeAndShape{result.GetTypeAndShape()};
-        CHECK(typeAndShape != nullptr);
-        return TypedWrapper<FunctionRef, ProcedureRef>(typeAndShape->type(),
+        return TypedWrapper<FunctionRef, ProcedureRef>(
+            DEREF(result.GetTypeAndShape()).type(),
             ProcedureRef{std::move(proc), std::move(arguments)});
       }
     }
