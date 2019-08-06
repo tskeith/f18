@@ -1517,11 +1517,13 @@ void ArraySpecVisitor::PostAttrSpec() {
   // on the entity-decl
   if (!arraySpec_.empty()) {
     CHECK(attrArraySpec_.empty());
-    attrArraySpec_.splice(attrArraySpec_.cbegin(), arraySpec_);
+    attrArraySpec_ = arraySpec_;
+    arraySpec_.clear();
   }
   if (!coarraySpec_.empty()) {
     CHECK(attrCoarraySpec_.empty());
-    attrCoarraySpec_.splice(attrCoarraySpec_.cbegin(), coarraySpec_);
+    attrCoarraySpec_ = coarraySpec_;
+    coarraySpec_.clear();
   }
 }
 
@@ -2853,6 +2855,8 @@ Symbol &DeclarationVisitor::DeclareObjectEntity(
     }
     SetBindNameOn(symbol);
   }
+  ClearArraySpec();
+  ClearCoarraySpec();
   charInfo_.length.reset();
   return symbol;
 }
@@ -3501,7 +3505,7 @@ void DeclarationVisitor::Post(const parser::CommonBlockObject &x) {
     return;  // error was reported
   }
   commonBlockInfo_.curr->get<CommonBlockDetails>().add_object(symbol);
-  if (!IsAllocatableOrPointer(symbol) && !IsExplicit(details->shape())) {
+  if (!IsAllocatableOrPointer(symbol) && !details->shape().IsExplicitShape()) {
     Say(name,
         "The shape of common block object '%s' must be explicit"_err_en_US);
     return;
