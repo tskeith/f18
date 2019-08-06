@@ -16,10 +16,40 @@
 #define FORTRAN_COMMON_TRACE_H_
 
 #include <forward_list>
+#include <list>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace Fortran::common {
+
+template<typename T>
+std::ostream &operator<<(std::ostream &os, const std::list<T> &list) {
+  if (list.empty()) {
+    return os << "[]";
+  } else {
+    char sep{'['};
+    for (const auto &x : list) {
+      os << sep << x;
+      sep = ',';
+    }
+    return os << ']';
+  }
+}
+
+template<typename T>
+std::ostream &operator<<(std::ostream &os, const std::vector<T> &vector) {
+  if (vector.empty()) {
+    return os << "[]";
+  } else {
+    char sep{'['};
+    for (const auto &x : vector) {
+      os << sep << x;
+      sep = ',';
+    }
+    return os << ']';
+  }
+}
 
 class Tracer {
 public:
