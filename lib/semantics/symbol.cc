@@ -20,10 +20,6 @@
 
 namespace Fortran::semantics {
 
-std::ostream &operator<<(std::ostream &os, const parser::CharBlock &name) {
-  return os << name.ToString();
-}
-
 template<typename T>
 static void DumpOptional(std::ostream &os, const char *label, const T &x) {
   if (x) {
@@ -57,8 +53,7 @@ static void DumpType(std::ostream &os, const DeclTypeSpec *type) {
 }
 
 template<typename T>
-static void DumpList(
-    std::ostream &os, const char *label, const std::list<T> &list) {
+static void DumpList(std::ostream &os, const char *label, const T &list) {
   if (!list.empty()) {
     os << ' ' << label << ':';
     char sep{' '};
@@ -567,25 +562,6 @@ void DerivedTypeDetails::add_component(const Symbol &symbol) {
     CHECK(componentNames_.empty());
   }
   componentNames_.push_back(symbol.name());
-}
-
-SymbolVector DerivedTypeDetails::OrderComponents(const Scope &scope) const {
-  SymbolVector result;
-  for (SourceName name : componentNames_) {
-    auto iter{scope.find(name)};
-    if (iter != scope.cend()) {
-      const Symbol &symbol{*iter->second};
-      if (symbol.test(Symbol::Flag::ParentComp)) {
-        CHECK(result.empty());  // parent component must appear first
-        const DerivedTypeSpec &spec{
-            symbol.get<ObjectEntityDetails>().type()->derivedTypeSpec()};
-        result = spec.typeSymbol().get<DerivedTypeDetails>().OrderComponents(
-            *spec.scope());
-      }
-      result.push_back(&symbol);
-    }
-  }
-  return result;
 }
 
 const Symbol *DerivedTypeDetails::GetParentComponent(const Scope &scope) const {

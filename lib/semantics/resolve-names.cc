@@ -159,17 +159,21 @@ public:
   template<typename T>
   MaybeExpr EvaluateConvertedExpr(
       const Symbol &symbol, const T &expr, parser::CharBlock source) {
-    if (auto maybeExpr{AnalyzeExpr(*context_, expr)}) {
-      if (auto converted{
-              evaluate::ConvertToType(symbol, std::move(*maybeExpr))}) {
-        return FoldExpr(std::move(*converted));
-      } else {
-        Say(source,
-            "Initialization expression could not be converted to declared type of symbol '%s'"_err_en_US,
-            symbol.name());
-      }
+    if (context().HasError(symbol)) {
+      return std::nullopt;
     }
-    return std::nullopt;
+    auto maybeExpr{AnalyzeExpr(*context_, expr)};
+    if (!maybeExpr) {
+      return std::nullopt;
+    }
+    auto converted{evaluate::ConvertToType(symbol, std::move(*maybeExpr))};
+    if (!converted) {
+      Say(source,
+          "Initialization expression could not be converted to declared type of '%s'"_err_en_US,
+          symbol.name());
+      return std::nullopt;
+    }
+    return FoldExpr(std::move(*converted));
   }
 
   template<typename T> MaybeIntExpr EvaluateIntExpr(const T &expr) {
@@ -852,6 +856,7 @@ private:
   void Initialization(const parser::Name &, const parser::Initialization &,
       bool inComponentDecl);
   bool PassesLocalityChecks(const parser::Name &name, Symbol &symbol);
+  bool CheckArraySpec(const parser::Name &, const Symbol &, const ArraySpec &);
 
   // Declare an object or procedure entity.
   // T is one of: EntityDetails, ObjectEntityDetails, ProcEntityDetails
@@ -1518,11 +1523,13 @@ void ArraySpecVisitor::PostAttrSpec() {
   // on the entity-decl
   if (!arraySpec_.empty()) {
     CHECK(attrArraySpec_.empty());
-    attrArraySpec_.splice(attrArraySpec_.cbegin(), arraySpec_);
+    attrArraySpec_ = arraySpec_;
+    arraySpec_.clear();
   }
   if (!coarraySpec_.empty()) {
     CHECK(attrCoarraySpec_.empty());
-    attrCoarraySpec_.splice(attrCoarraySpec_.cbegin(), coarraySpec_);
+    attrCoarraySpec_ = coarraySpec_;
+    coarraySpec_.clear();
   }
 }
 
@@ -2707,7 +2714,7 @@ bool DeclarationVisitor::Pre(const parser::ExternalStmt &x) {
 bool DeclarationVisitor::Pre(const parser::IntentStmt &x) {
   auto &intentSpec{std::get<parser::IntentSpec>(x.t)};
   auto &names{std::get<std::list<parser::Name>>(x.t)};
-  return CheckNotInBlock("INTENT") &&
+  return CheckNotInBlock("INTENT") &&  // C1107
       HandleAttributeStmt(IntentSpecToAttr(intentSpec), names);
 }
 bool DeclarationVisitor::Pre(const parser::IntrinsicStmt &x) {
@@ -2726,14 +2733,15 @@ bool DeclarationVisitor::Pre(const parser::IntrinsicStmt &x) {
   return false;
 }
 bool DeclarationVisitor::Pre(const parser::OptionalStmt &x) {
-  return CheckNotInBlock("OPTIONAL") &&
+  return CheckNotInBlock("OPTIONAL") &&  // C1107
       HandleAttributeStmt(Attr::OPTIONAL, x.v);
 }
 bool DeclarationVisitor::Pre(const parser::ProtectedStmt &x) {
   return HandleAttributeStmt(Attr::PROTECTED, x.v);
 }
 bool DeclarationVisitor::Pre(const parser::ValueStmt &x) {
-  return CheckNotInBlock("VALUE") && HandleAttributeStmt(Attr::VALUE, x.v);
+  return CheckNotInBlock("VALUE") &&  // C1107
+      HandleAttributeStmt(Attr::VALUE, x.v);
 }
 bool DeclarationVisitor::Pre(const parser::VolatileStmt &x) {
   return HandleAttributeStmt(Attr::VOLATILE, x.v);
@@ -2769,7 +2777,7 @@ Symbol &DeclarationVisitor::HandleAttributeStmt(
   symbol->attrs() = HandleSaveName(name.source, symbol->attrs());
   return *symbol;
 }
-
+// C1107
 bool DeclarationVisitor::CheckNotInBlock(const char *stmt) {
   if (currScope().kind() == Scope::Kind::Block) {
     Say(MessageFormattedText{
@@ -2837,10 +2845,11 @@ Symbol &DeclarationVisitor::DeclareObjectEntity(
         Say(name,
             "The dimensions of '%s' have already been declared"_err_en_US);
         context().SetError(symbol);
-      } else {
+      } else if (CheckArraySpec(name, symbol, arraySpec())) {
         details->set_shape(arraySpec());
+      } else {
+        context().SetError(symbol);
       }
-      ClearArraySpec();
     }
     if (!coarraySpec().empty()) {
       if (details->IsCoarray()) {
@@ -2850,12 +2859,96 @@ Symbol &DeclarationVisitor::DeclareObjectEntity(
       } else {
         details->set_coshape(coarraySpec());
       }
-      ClearCoarraySpec();
     }
     SetBindNameOn(symbol);
   }
+  ClearArraySpec();
+  ClearCoarraySpec();
   charInfo_.length.reset();
   return symbol;
+}
+
+// The six different kinds of array-specs:
+//   array-spec     -> explicit-shape-list | deferred-shape-list
+//                     | assumed-shape-list | implied-shape-list
+//                     | assumed-size | assumed-rank
+//   explicit-shape -> [ lb : ] ub
+//   deferred-shape -> :
+//   assumed-shape  -> [ lb ] :
+//   implied-shape  -> [ lb : ] *
+//   assumed-size   -> [ explicit-shape-list , ] [ lb : ] *
+//   assumed-rank   -> ..
+// Note:
+// - deferred-shape is also an assumed-shape
+// - A single "*" or "lb:*" might be assumed-size or implied-shape-list
+bool DeclarationVisitor::CheckArraySpec(const parser::Name &name,
+    const Symbol &symbol, const ArraySpec &arraySpec) {
+  CHECK(arraySpec.Rank() > 0);
+  bool isExplicit{arraySpec.IsExplicitShape()};
+  bool isDeferred{arraySpec.IsDeferredShape()};
+  bool isImplied{arraySpec.IsImpliedShape()};
+  bool isAssumedShape{arraySpec.IsAssumedShape()};
+  bool isAssumedSize{arraySpec.IsAssumedSize()};
+  bool isAssumedRank{arraySpec.IsAssumedRank()};
+  if (IsAllocatableOrPointer(symbol) && !isDeferred && !isAssumedRank) {
+    if (symbol.owner().IsDerivedType()) {  // C745
+      if (IsAllocatable(symbol)) {
+        Say(name,
+            "Allocatable array component '%s' must have deferred shape"_err_en_US);
+      } else {
+        Say(name,
+            "Array pointer component '%s' must have deferred shape"_err_en_US);
+      }
+    } else {
+      if (IsAllocatable(symbol)) {  // C832
+        Say(name,
+            "Allocatable array '%s' must have deferred shape or assumed rank"_err_en_US);
+      } else {
+        Say(name,
+            "Array pointer '%s' must have deferred shape or assumed rank"_err_en_US);
+      }
+    }
+    return false;
+  }
+  if (symbol.IsDummy()) {
+    if (isImplied && !isAssumedSize) {  // C836
+      Say(name,
+          "Dummy array argument '%s' may not have implied shape"_err_en_US);
+      return false;
+    }
+  } else if (isAssumedShape && !isDeferred) {
+    Say(name, "Assumed-shape array '%s' must be a dummy argument"_err_en_US);
+    return false;
+  } else if (isAssumedSize && !isImplied) {  // C833
+    Say(name, "Assumed-size array '%s' must be a dummy argument"_err_en_US);
+    return false;
+  } else if (isAssumedRank) {  // C837
+    Say(name, "Assumed-rank array '%s' must be a dummy argument"_err_en_US);
+    return false;
+  } else if (isImplied) {
+    if (!symbol.attrs().test(Attr::PARAMETER)) {  // C836
+      Say(name, "Implied-shape array '%s' must be a named constant"_err_en_US);
+      return false;
+    }
+  } else if (symbol.attrs().test(Attr::PARAMETER)) {
+    if (!isExplicit && !isImplied) {
+      Say(name,
+          "Named constant '%s' array must have explicit or implied shape"_err_en_US);
+      return false;
+    }
+  } else if (!IsAllocatableOrPointer(symbol) && !isExplicit) {
+    if (symbol.owner().IsDerivedType()) {  // C749
+      Say(name,
+          "Component array '%s' without ALLOCATABLE or POINTER attribute must"
+          " have explicit shape"_err_en_US);
+    } else {  // C816
+      Say(name,
+          "Array '%s' without ALLOCATABLE or POINTER attribute must have"
+          " explicit shape"_err_en_US);
+    }
+    return false;
+  }
+  return true;
 }
 
 void DeclarationVisitor::Post(const parser::IntegerTypeSpec &x) {
@@ -3438,7 +3531,7 @@ bool DeclarationVisitor::Pre(const parser::StructureConstructor &x) {
 }
 
 bool DeclarationVisitor::Pre(const parser::NamelistStmt::Group &x) {
-  if (!CheckNotInBlock("NAMELIST")) {
+  if (!CheckNotInBlock("NAMELIST")) {  // C1107
     return false;
   }
 
@@ -3480,7 +3573,7 @@ bool DeclarationVisitor::Pre(const parser::IoControlSpec &x) {
 }
 
 bool DeclarationVisitor::Pre(const parser::CommonStmt::Block &x) {
-  CheckNotInBlock("COMMON");
+  CheckNotInBlock("COMMON");  // C1107
   const auto &optName{std::get<std::optional<parser::Name>>(x.t)};
   parser::Name blankCommon;
   blankCommon.source = SourceName{currStmtSource()->begin(), std::size_t{0}};
@@ -3510,11 +3603,6 @@ void DeclarationVisitor::Post(const parser::CommonBlockObject &x) {
     return;  // error was reported
   }
   commonBlockInfo_.curr->get<CommonBlockDetails>().add_object(symbol);
-  if (!IsAllocatableOrPointer(symbol) && !IsExplicit(details->shape())) {
-    Say(name,
-        "The shape of common block object '%s' must be explicit"_err_en_US);
-    return;
-  }
   auto pair{commonBlockInfo_.names.insert(name.source)};
   if (!pair.second) {
     const SourceName &prev{*pair.first};
@@ -3527,6 +3615,7 @@ void DeclarationVisitor::Post(const parser::CommonBlockObject &x) {
 
 bool DeclarationVisitor::Pre(const parser::EquivalenceStmt &x) {
   // save equivalence sets to be processed after specification part
+  CheckNotInBlock("EQUIVALENCE");  // C1107
   for (const std::list<parser::EquivalenceObject> &set : x.v) {
     equivalenceSets_.push_back(&set);
   }
@@ -3597,9 +3686,15 @@ void DeclarationVisitor::CheckSaveStmts() {
     if (auto *symbol{currScope().FindCommonBlock(name)}) {
       auto &objects{symbol->get<CommonBlockDetails>().objects()};
       if (objects.empty()) {
-        Say(name,
-            "'%s' appears as a COMMON block in a SAVE statement but not in"
-            " a COMMON statement"_err_en_US);
+        if (currScope().kind() != Scope::Kind::Block) {
+          Say(name,
+              "'%s' appears as a COMMON block in a SAVE statement but not in"
+              " a COMMON statement"_err_en_US);
+        } else {  // C1108
+          Say(name,
+             "SAVE statement in BLOCK construct may not contain a"
+             " common block name '%s'"_err_en_US);
+        }
       } else {
         for (Symbol *object : symbol->get<CommonBlockDetails>().objects()) {
           SetSaveAttr(*object);
@@ -5143,7 +5238,8 @@ void ResolveNamesVisitor::CheckImport(
 }
 
 bool ResolveNamesVisitor::Pre(const parser::ImplicitStmt &x) {
-  return CheckNotInBlock("IMPLICIT") && ImplicitRulesVisitor::Pre(x);
+  return CheckNotInBlock("IMPLICIT") &&  // C1107
+      ImplicitRulesVisitor::Pre(x);
 }
 
 void ResolveNamesVisitor::Post(const parser::PointerObject &x) {
@@ -5194,6 +5290,7 @@ void ResolveNamesVisitor::Post(const parser::TypeGuardStmt &x) {
   ConstructVisitor::Post(x);
 }
 bool ResolveNamesVisitor::Pre(const parser::StmtFunctionStmt &x) {
+  CheckNotInBlock("STATEMENT FUNCTION");  // C1107
   if (!HandleStmtFunction(x)) {
     // This is an array element assignment: resolve names of indices
     const auto &names{std::get<std::list<parser::Name>>(x.t)};
@@ -5263,6 +5360,21 @@ void ResolveNamesVisitor::ResolveSpecificationParts(ProgramTree &node) {
   AddSubpNames(node);
   std::visit([&](const auto *x) { Walk(*x); }, node.stmt());
   Walk(node.spec());
+  // If this is a function, convert result to an object. This is to prevent the
+  // result to be converted later to a function symbol if it is called inside
+  // the function.
+  // If the result is function pointer, then ConvertToObjectEntity will not
+  // convert the result to an object, and calling the symbol inside the function
+  // will result in calls to the result pointer.
+  // A function cannot be called recursively if RESULT was not used to define a
+  // distinct result name (15.6.2.2 point 4.).
+  if (Symbol * symbol{scope.symbol()}) {
+    if (auto *details{symbol->detailsIf<SubprogramDetails>()}) {
+      if (details->isFunction()) {
+        ConvertToObjectEntity(const_cast<Symbol &>(details->result()));
+      }
+    }
+  }
   if (node.IsModule()) {
     ApplyDefaultAccess();
   }

@@ -1,4 +1,4 @@
-! Copyright (c) 2018-2019, NVIDIA CORPORATION.  All rights reserved.
+! Copyright (c) 2019, ARM Ltd.  All rights reserved.
 !
 ! Licensed under the Apache License, Version 2.0 (the "License");
 ! you may not use this file except in compliance with the License.
@@ -12,18 +12,17 @@
 ! See the License for the specific language governing permissions and
 ! limitations under the License.
 
-program p
-  !ERROR: 'p' is already declared in this scoping unit
-  integer p
-end
-subroutine s
-  !ERROR: 's' is already declared in this scoping unit
-  integer :: s
-end
-function f() result(res)
-  integer :: res
-  !ERROR: 'f' is already declared in this scoping unit
-  !ERROR: The type of 'f' has already been declared
-  real :: f
-  res = 1
-end
+! C1108  --  Save statement in a BLOCK construct shall not conatin a
+!            saved-entity-list that does not specify a common-block-name
+
+program  main
+  integer x, y, z
+  real r, s, t
+  common /argmnt2/ r, s, t
+  !ERROR: 'argmnt1' appears as a COMMON block in a SAVE statement but not in a COMMON statement
+  save /argmnt1/
+  block
+    !ERROR: SAVE statement in BLOCK construct may not contain a common block name 'argmnt2'
+    save /argmnt2/
+  end block
+end program

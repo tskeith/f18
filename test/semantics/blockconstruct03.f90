@@ -1,4 +1,4 @@
-! Copyright (c) 2018-2019, NVIDIA CORPORATION.  All rights reserved.
+! Copyright (c) 2019, ARM Ltd.  All rights reserved.
 !
 ! Licensed under the Apache License, Version 2.0 (the "License");
 ! you may not use this file except in compliance with the License.
@@ -12,18 +12,13 @@
 ! See the License for the specific language governing permissions and
 ! limitations under the License.
 
-program p
-  !ERROR: 'p' is already declared in this scoping unit
-  integer p
+! Tests implemented for this standard:
+!            Block Construct
+! C1109
+
+subroutine s5_c1109
+  b1:block
+  !ERROR: BLOCK construct name mismatch
+  end block b2
 end
-subroutine s
-  !ERROR: 's' is already declared in this scoping unit
-  integer :: s
-end
-function f() result(res)
-  integer :: res
-  !ERROR: 'f' is already declared in this scoping unit
-  !ERROR: The type of 'f' has already been declared
-  real :: f
-  res = 1
-end
+

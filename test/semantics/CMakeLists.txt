@@ -94,6 +94,8 @@ set(ERROR_TESTS
   resolve55.f90
   resolve56.f90
   resolve57.f90
+  resolve58.f90
+  resolve59.f90
   stop01.f90
   structconst01.f90
   structconst02.f90
@@ -147,6 +149,9 @@ set(ERROR_TESTS
   if_arith01.f90
   if_construct01.f90
   if_stmt01.f90
+  blockconstruct01.f90
+  blockconstruct02.f90
+  blockconstruct03.f90
 )
 
 # These test files have expected symbols in the source
