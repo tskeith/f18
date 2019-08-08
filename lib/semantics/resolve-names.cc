@@ -2302,6 +2302,9 @@ void InterfaceVisitor::CheckSpecificsAreDistinguishable(
   using evaluate::characteristics::Procedure;
   std::vector<Procedure> procs;
   for (const Symbol *symbol : specifics) {
+    if (context().HasError(*symbol)) {
+      return;
+    }
     auto proc{Procedure::Characterize(*symbol, context().intrinsics())};
     if (!proc) {
       return;
@@ -2509,8 +2512,8 @@ Symbol &SubprogramVisitor::PushSubprogramScope(
       }
     }
     symbol = &MakeSymbol(name, SubprogramDetails{});
-    symbol->set(subpFlag);
   }
+  symbol->set(subpFlag);
   PushScope(Scope::Kind::Subprogram, symbol);
   auto &details{symbol->get<SubprogramDetails>()};
   if (inInterfaceBlock()) {
@@ -2537,9 +2540,9 @@ Symbol *SubprogramVisitor::GetSpecificFromGeneric(const parser::Name &name) {
         if (specific) {
           SayAlreadyDeclared(name, *specific);
         } else {
-          EraseSymbol(name);
-          specific = &MakeSymbol(name, Attrs{}, SubprogramDetails{});
-          GetGenericDetails().set_specific(*specific);
+          specific = &currScope().MakeSymbol(
+              name.source, Attrs{}, SubprogramDetails{});
+          GetGenericDetails().set_specific(Resolve(name, *specific));
         }
       }
       if (specific) {
@@ -3692,8 +3695,8 @@ void DeclarationVisitor::CheckSaveStmts() {
               " a COMMON statement"_err_en_US);
         } else {  // C1108
           Say(name,
-             "SAVE statement in BLOCK construct may not contain a"
-             " common block name '%s'"_err_en_US);
+              "SAVE statement in BLOCK construct may not contain a"
+              " common block name '%s'"_err_en_US);
         }
       } else {
         for (Symbol *object : symbol->get<CommonBlockDetails>().objects()) {
