@@ -2536,21 +2536,16 @@ Symbol *SubprogramVisitor::GetSpecificFromGeneric(const parser::Name &name) {
     if (auto *details{symbol->detailsIf<GenericDetails>()}) {
       // found generic, want subprogram
       auto *specific{details->specific()};
-      if (isGeneric()) {
-        if (specific) {
-          SayAlreadyDeclared(name, *specific);
-        } else {
-          specific = &currScope().MakeSymbol(
-              name.source, Attrs{}, SubprogramDetails{});
-          GetGenericDetails().set_specific(Resolve(name, *specific));
-        }
+      if (!specific) {
+        specific =
+            &currScope().MakeSymbol(name.source, Attrs{}, SubprogramDetails{});
+        details->set_specific(Resolve(name, *specific));
+      } else if (isGeneric()) {
+        SayAlreadyDeclared(name, *specific);
+      } else if (!specific->has<SubprogramDetails>()) {
+        specific->set_details(SubprogramDetails{});
       }
-      if (specific) {
-        if (!specific->has<SubprogramDetails>()) {
-          specific->set_details(SubprogramDetails{});
-        }
-        return specific;
-      }
+      return specific;
     }
   }
   return nullptr;
