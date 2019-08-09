@@ -144,6 +144,7 @@ set(ERROR_TESTS
   omp-clause-validity01.f90
 #  omp-nested01.f90
   omp-declarative-directive.f90
+  omp-atomic.f90
   equivalence01.f90
   init01.f90
   if_arith01.f90
@@ -169,6 +170,7 @@ set(SYMBOL_TESTS
   symbol12.f90
   symbol13.f90
   symbol14.f90
+  symbol15.f90
   kinds01.f90
   kinds03.f90
   procinterface01.f90
