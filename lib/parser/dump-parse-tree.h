@@ -413,6 +413,8 @@ public:
   NODE(parser, OmpAtomicUpdate)
   NODE(parser, OmpAtomicWrite)
   NODE(parser, OmpBeginBlockDirective)
+  NODE(parser, OmpBeginLoopDirective)
+  NODE(parser, OmpBeginSectionsDirective)
   NODE(parser, OmpBlockDirective)
   NODE_ENUM(parser::OmpBlockDirective, Directive)
   NODE(parser, OmpCancelType)
@@ -469,10 +471,8 @@ public:
   NODE(parser, OmpEndAtomic)
   NODE(parser, OmpEndBlockDirective)
   NODE(parser, OmpEndCriticalDirective)
-  NODE(parser, OmpEndDo)
-  NODE(parser, OmpEndDoSimd)
-  NODE(parser, OmpEndParallelSections)
-  NODE(parser, OmpEndSections)
+  NODE(parser, OmpEndLoopDirective)
+  NODE(parser, OmpEndSectionsDirective)
   NODE(parser, OmpIfClause)
   NODE_ENUM(parser::OmpIfClause, DirectiveNameModifier)
   NODE(parser, OmpLinearClause)
@@ -508,7 +508,9 @@ public:
   NODE(parser::OmpScheduleModifier, Modifier2)
   NODE(parser, OmpScheduleModifierType)
   NODE_ENUM(parser::OmpScheduleModifierType, ModType)
-  NODE(parser, OmpSection)
+  NODE(parser, OmpSectionBlocks)
+  NODE(parser, OmpSectionsDirective)
+  NODE_ENUM(parser::OmpSectionsDirective, Directive)
   NODE(parser, OmpSimpleStandaloneDirective)
   NODE_ENUM(parser::OmpSimpleStandaloneDirective, Directive)
   NODE(parser, Only)
@@ -527,14 +529,12 @@ public:
   NODE(parser::OpenMPDeclareTargetSpecifier, Implicit)
   NODE(parser::OpenMPDeclareTargetSpecifier, WithClause)
   NODE(parser::OpenMPDeclareTargetSpecifier, WithExtendedList)
-  NODE(parser, OpenMPEndLoopDirective)
   NODE(parser, OpenMPFlushConstruct)
   NODE(parser, OpenMPLoopConstruct)
   NODE(parser, OpenMPSimpleStandaloneConstruct)
   NODE(parser, OpenMPStandaloneConstruct)
   NODE(parser, OpenMPSectionsConstruct)
   NODE(parser, OpenMPThreadprivate)
-  NODE(parser, OpenMPParallelSectionsConstruct)
   NODE(parser, OpenStmt)
   NODE(parser, Optional)
   NODE(parser, OptionalStmt)
@@ -698,7 +698,7 @@ public:
     return true;
   }
 
-  template<typename T> void Post(const T &x) {
+  template<typename T> void Post(const T &) {
     if constexpr (!HasSource<T>::value && (UnionTrait<T> || WrapperTrait<T>)) {
       EndLineIfNonempty();
     } else {
@@ -726,8 +726,7 @@ public:
     EndLine();
     return true;
   }
-
-  void Post(const std::int64_t &x) { --indent_; }
+  void Post(const std::int64_t &) { --indent_; }
 
   bool Pre(const std::uint64_t &x) {
     IndentEmptyLine();

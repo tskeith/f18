@@ -73,19 +73,22 @@ public:
   void set_inheritFromParent(bool x) { inheritFromParent_ = x; }
   // Get the implicit type for identifiers starting with ch. May be null.
   const DeclTypeSpec *GetType(char ch) const;
-  // Record the implicit type for this range of characters.
-  void SetType(const DeclTypeSpec &type, parser::Location lo, parser::Location,
-      bool isDefault = false);
+  // Record the implicit type for the range of characters [fromLetter,
+  // toLetter].
+  void SetTypeMapping(const DeclTypeSpec &type, parser::Location fromLetter,
+      parser::Location toLetter);
 
 private:
   static char Incr(char ch);
 
   ImplicitRules *parent_;
   SemanticsContext &context_;
-  bool inheritFromParent_;  // look in parent if not specified here
-  std::optional<bool> isImplicitNoneType_;
-  std::optional<bool> isImplicitNoneExternal_;
-  // map initial character of identifier to nullptr or its default type
+  bool inheritFromParent_{false};  // look in parent if not specified here
+  bool isImplicitNoneType_{false};
+  bool isImplicitNoneExternal_{false};
+  // map_ contains the mapping between letters and types that were defined
+  // by the IMPLICIT statements of the related scope. It does not contain
+  // the default Fortran mappings nor the mapping defined in parents.
   std::map<char, const DeclTypeSpec *> map_;
 
   friend std::ostream &operator<<(std::ostream &, const ImplicitRules &);
@@ -698,7 +701,7 @@ public:
     return true;
   }
   void Post(const parser::AllocatableStmt &) { objectDeclAttr_ = std::nullopt; }
-  bool Pre(const parser::TargetStmt &x) {
+  bool Pre(const parser::TargetStmt &) {
     objectDeclAttr_ = Attr::TARGET;
     return true;
   }
@@ -721,13 +724,13 @@ public:
   bool Pre(const parser::DeclarationTypeSpec::Record &);
   void Post(const parser::DerivedTypeSpec &);
   bool Pre(const parser::DerivedTypeDef &);
-  bool Pre(const parser::DerivedTypeStmt &x);
-  void Post(const parser::DerivedTypeStmt &x);
-  bool Pre(const parser::TypeParamDefStmt &x) { return BeginDecl(); }
+  bool Pre(const parser::DerivedTypeStmt &);
+  void Post(const parser::DerivedTypeStmt &);
+  bool Pre(const parser::TypeParamDefStmt &) { return BeginDecl(); }
   void Post(const parser::TypeParamDefStmt &);
-  bool Pre(const parser::TypeAttrSpec::Extends &x);
-  bool Pre(const parser::PrivateStmt &x);
-  bool Pre(const parser::SequenceStmt &x);
+  bool Pre(const parser::TypeAttrSpec::Extends &);
+  bool Pre(const parser::PrivateStmt &);
+  bool Pre(const parser::SequenceStmt &);
   bool Pre(const parser::ComponentDefStmt &) { return BeginDecl(); }
   void Post(const parser::ComponentDefStmt &) { EndDecl(); }
   void Post(const parser::ComponentDecl &);
@@ -948,7 +951,7 @@ public:
   bool Pre(const parser::WhereConstructStmt &x) { return CheckDef(x.t); }
   bool Pre(const parser::ForallConstructStmt &x) { return CheckDef(x.t); }
   bool Pre(const parser::CriticalStmt &x) { return CheckDef(x.t); }
-  bool Pre(const parser::LabelDoStmt &x) {
+  bool Pre(const parser::LabelDoStmt &) {
     return false;  // error recovery
   }
   bool Pre(const parser::NonLabelDoStmt &x) { return CheckDef(x.t); }
@@ -1109,9 +1112,9 @@ private:
 // ImplicitRules implementation
 
 bool ImplicitRules::isImplicitNoneType() const {
-  if (isImplicitNoneType_.has_value()) {
-    return isImplicitNoneType_.value();
-  } else if (inheritFromParent_) {
+  if (isImplicitNoneType_) {
+    return true;
+  } else if (map_.empty() && inheritFromParent_) {
     return parent_->isImplicitNoneType();
   } else {
     return false;  // default if not specified
@@ -1119,8 +1122,8 @@ bool ImplicitRules::isImplicitNoneType() const {
 }
 
 bool ImplicitRules::isImplicitNoneExternal() const {
-  if (isImplicitNoneExternal_.has_value()) {
-    return isImplicitNoneExternal_.value();
+  if (isImplicitNoneExternal_) {
+    return true;
   } else if (inheritFromParent_) {
     return parent_->isImplicitNoneExternal();
   } else {
@@ -1129,7 +1132,9 @@ bool ImplicitRules::isImplicitNoneExternal() const {
 }
 
 const DeclTypeSpec *ImplicitRules::GetType(char ch) const {
-  if (auto it{map_.find(ch)}; it != map_.end()) {
+  if (isImplicitNoneType_) {
+    return nullptr;
+  } else if (auto it{map_.find(ch)}; it != map_.end()) {
     return it->second;
   } else if (inheritFromParent_) {
     return parent_->GetType(ch);
@@ -1142,17 +1147,15 @@ const DeclTypeSpec *ImplicitRules::GetType(char ch) const {
   }
 }
 
-// isDefault is set when we are applying the default rules, so it is not
-// an error if the type is already set.
-void ImplicitRules::SetType(const DeclTypeSpec &type, parser::Location lo,
-    parser::Location hi, bool isDefault) {
-  for (char ch = *lo; ch; ch = ImplicitRules::Incr(ch)) {
+void ImplicitRules::SetTypeMapping(const DeclTypeSpec &type,
+    parser::Location fromLetter, parser::Location toLetter) {
+  for (char ch = *fromLetter; ch; ch = ImplicitRules::Incr(ch)) {
     auto res{map_.emplace(ch, &type)};
-    if (!res.second && !isDefault) {
-      context_.Say(parser::CharBlock{lo},
+    if (!res.second) {
+      context_.Say(parser::CharBlock{fromLetter},
           "More than one implicit type specified for '%c'"_err_en_US, ch);
     }
-    if (ch == *hi) {
+    if (ch == *toLetter) {
       break;
     }
   }
@@ -1379,21 +1382,23 @@ Message &MessageHandler::Say(const SourceName &name, MessageFixedText &&msg) {
 
 // ImplicitRulesVisitor implementation
 
-void ImplicitRulesVisitor::Post(const parser::ParameterStmt &x) {
+void ImplicitRulesVisitor::Post(const parser::ParameterStmt &) {
   prevParameterStmt_ = currStmtSource();
 }
 
 bool ImplicitRulesVisitor::Pre(const parser::ImplicitStmt &x) {
   bool result{std::visit(
       common::visitors{
-          [&](const std::list<ImplicitNoneNameSpec> &x) {
-            return HandleImplicitNone(x);
+          [&](const std::list<ImplicitNoneNameSpec> &y) {
+            return HandleImplicitNone(y);
           },
-          [&](const std::list<parser::ImplicitSpec> &x) {
+          [&](const std::list<parser::ImplicitSpec> &) {
             if (prevImplicitNoneType_) {
               Say("IMPLICIT statement after IMPLICIT NONE or "
                   "IMPLICIT NONE(TYPE) statement"_err_en_US);
               return false;
+            } else {
+              implicitRules().set_isImplicitNoneType(false);
             }
             return true;
           },
@@ -1414,7 +1419,7 @@ bool ImplicitRulesVisitor::Pre(const parser::LetterSpec &x) {
       return false;
     }
   }
-  implicitRules().SetType(*GetDeclTypeSpec(), loLoc, hiLoc);
+  implicitRules().SetTypeMapping(*GetDeclTypeSpec(), loLoc, hiLoc);
   return false;
 }
 
@@ -1765,28 +1770,22 @@ static bool NeedsType(const Symbol &symbol) {
 }
 void ScopeHandler::ApplyImplicitRules(Symbol &symbol) {
   if (NeedsType(symbol)) {
-    if (isImplicitNoneType()) {
-      if (symbol.has<ProcEntityDetails>() &&
-          !symbol.attrs().test(Attr::EXTERNAL) &&
-          context().intrinsics().IsIntrinsic(symbol.name().ToString())) {
-        // type will be determined in expression semantics
-        symbol.attrs().set(Attr::INTRINSIC);
-      } else {
-        Say(symbol.name(), "No explicit type declared for '%s'"_err_en_US);
-      }
-    } else if (const auto *type{GetImplicitType(symbol)}) {
+    if (const DeclTypeSpec * type{GetImplicitType(symbol)}) {
+      symbol.set(Symbol::Flag::Implicit);
       symbol.SetType(*type);
+    } else if (symbol.has<ProcEntityDetails>() &&
+        !symbol.attrs().test(Attr::EXTERNAL) &&
+        context().intrinsics().IsIntrinsic(symbol.name().ToString())) {
+      // type will be determined in expression semantics
+      symbol.attrs().set(Attr::INTRINSIC);
+    } else {
+      Say(symbol.name(), "No explicit type declared for '%s'"_err_en_US);
     }
   }
 }
 const DeclTypeSpec *ScopeHandler::GetImplicitType(Symbol &symbol) {
   auto &name{symbol.name()};
   const auto *type{implicitRules().GetType(name.begin()[0])};
-  if (type) {
-    symbol.set(Symbol::Flag::Implicit);
-  } else {
-    Say(name, "No explicit type declared for '%s'"_err_en_US);
-  }
   return type;
 }
 
@@ -2127,7 +2126,7 @@ bool InterfaceVisitor::Pre(const parser::ProcedureStmt &x) {
   return false;
 }
 
-bool InterfaceVisitor::Pre(const parser::GenericStmt &x) {
+bool InterfaceVisitor::Pre(const parser::GenericStmt &) {
   genericInfo_.emplace(/*isInterface*/ false);
   return true;
 }
@@ -2332,7 +2331,7 @@ void InterfaceVisitor::CheckSpecificsAreDistinguishable(
 
 // SubprogramVisitor implementation
 
-void SubprogramVisitor::Post(const parser::StmtFunctionStmt &x) {
+void SubprogramVisitor::Post(const parser::StmtFunctionStmt &) {
   if (badStmtFuncFound_) {
     return;  // This wasn't really a stmt function so no scope was created
   }
@@ -2425,10 +2424,10 @@ void SubprogramVisitor::Post(const parser::InterfaceBody::Function &) {
   EndSubprogram();
 }
 
-bool SubprogramVisitor::Pre(const parser::SubroutineStmt &stmt) {
+bool SubprogramVisitor::Pre(const parser::SubroutineStmt &) {
   return BeginAttrs();
 }
-bool SubprogramVisitor::Pre(const parser::FunctionStmt &stmt) {
+bool SubprogramVisitor::Pre(const parser::FunctionStmt &) {
   return BeginAttrs();
 }
 
@@ -2769,16 +2768,21 @@ Symbol &DeclarationVisitor::HandleAttributeStmt(
     Say(name.source, "'%s' is not a known intrinsic procedure"_err_en_US);
   }
   auto *symbol{FindInScope(currScope(), name)};
-  if (symbol) {
-    // symbol was already there: set attribute on it
-    if (attr == Attr::ASYNCHRONOUS || attr == Attr::VOLATILE) {
-      // TODO: if in a BLOCK, attribute should only be set while in the block
-    } else if (symbol->has<UseDetails>()) {
-      Say(*currStmtSource(),
-          "Cannot change %s attribute on use-associated '%s'"_err_en_US,
-          EnumToString(attr), name.source);
+  if (attr == Attr::ASYNCHRONOUS || attr == Attr::VOLATILE) {
+    // these can be set on a symbol that is host-assoc into block or use-assoc
+    if (!symbol && currScope().kind() == Scope::Kind::Block) {
+      if (auto *hostSymbol{FindSymbol(name)}) {
+        name.symbol = nullptr;
+        symbol = &MakeSymbol(name, HostAssocDetails{*hostSymbol});
+      }
     }
-  } else {
+  } else if (symbol && symbol->has<UseDetails>()) {
+    Say(*currStmtSource(),
+        "Cannot change %s attribute on use-associated '%s'"_err_en_US,
+        EnumToString(attr), name.source);
+    return *symbol;
+  }
+  if (!symbol) {
     symbol = &MakeSymbol(name, EntityDetails{});
   }
   symbol->attrs().set(attr);
@@ -2971,7 +2975,7 @@ void DeclarationVisitor::Post(const parser::IntrinsicTypeSpec::Complex &x) {
 void DeclarationVisitor::Post(const parser::IntrinsicTypeSpec::Logical &x) {
   SetDeclTypeSpec(MakeLogicalType(x.kind));
 }
-void DeclarationVisitor::Post(const parser::IntrinsicTypeSpec::Character &x) {
+void DeclarationVisitor::Post(const parser::IntrinsicTypeSpec::Character &) {
   if (!charInfo_.length) {
     charInfo_.length = ParamValue{1, common::TypeParamAttr::Len};
   }
@@ -3015,12 +3019,12 @@ bool DeclarationVisitor::Pre(const parser::KindParam &x) {
   return false;
 }
 
-bool DeclarationVisitor::Pre(const parser::DeclarationTypeSpec::Type &x) {
+bool DeclarationVisitor::Pre(const parser::DeclarationTypeSpec::Type &) {
   CHECK(GetDeclTypeSpecCategory() == DeclTypeSpec::Category::TypeDerived);
   return true;
 }
 
-bool DeclarationVisitor::Pre(const parser::DeclarationTypeSpec::Class &x) {
+bool DeclarationVisitor::Pre(const parser::DeclarationTypeSpec::Class &) {
   SetDeclTypeSpecCategory(DeclTypeSpec::Category::ClassDerived);
   return true;
 }
@@ -3203,7 +3207,7 @@ bool DeclarationVisitor::Pre(const parser::DerivedTypeDef &x) {
   PopScope();
   return false;
 }
-bool DeclarationVisitor::Pre(const parser::DerivedTypeStmt &x) {
+bool DeclarationVisitor::Pre(const parser::DerivedTypeStmt &) {
   return BeginAttrs();
 }
 void DeclarationVisitor::Post(const parser::DerivedTypeStmt &x) {
@@ -3270,7 +3274,7 @@ bool DeclarationVisitor::Pre(const parser::TypeAttrSpec::Extends &x) {
   return false;
 }
 
-bool DeclarationVisitor::Pre(const parser::PrivateStmt &x) {
+bool DeclarationVisitor::Pre(const parser::PrivateStmt &) {
   if (!currScope().parent().IsModule()) {
     Say("PRIVATE is only allowed in a derived type that is"
         " in a module"_err_en_US);  // C766
@@ -3284,7 +3288,7 @@ bool DeclarationVisitor::Pre(const parser::PrivateStmt &x) {
   }
   return false;
 }
-bool DeclarationVisitor::Pre(const parser::SequenceStmt &x) {
+bool DeclarationVisitor::Pre(const parser::SequenceStmt &) {
   derivedTypeInfo_.sequence = true;
   return false;
 }
@@ -3367,7 +3371,7 @@ void DeclarationVisitor::Post(const parser::ProcDecl &x) {
   }
 }
 
-bool DeclarationVisitor::Pre(const parser::TypeBoundProcedurePart &x) {
+bool DeclarationVisitor::Pre(const parser::TypeBoundProcedurePart &) {
   derivedTypeInfo_.sawContains = true;
   return true;
 }
@@ -3616,7 +3620,7 @@ void DeclarationVisitor::Post(const parser::CommonStmt::Block &) {
   commonBlockInfo_.curr = nullptr;
 }
 
-bool DeclarationVisitor::Pre(const parser::CommonBlockObject &x) {
+bool DeclarationVisitor::Pre(const parser::CommonBlockObject &) {
   BeginArraySpec();
   return true;
 }
@@ -4941,8 +4945,7 @@ void DeclarationVisitor::Initialization(const parser::Name &name,
                 details->set_init(std::move(*expr));
               }
             },
-            [&](const std::list<common::Indirection<parser::DataStmtValue>>
-                    &list) {
+            [&](const std::list<common::Indirection<parser::DataStmtValue>> &) {
               if (inComponentDecl) {
                 Say(name,
                     "Component '%s' initialized with DATA statement values"_err_en_US);
@@ -5210,7 +5213,7 @@ void ResolveNamesVisitor::PreSpecificationConstruct(
     const parser::SpecificationConstruct &spec) {
   std::visit(
       common::visitors{
-          [&](const Indirection<parser::DerivedTypeDef> &y) {},
+          [&](const Indirection<parser::DerivedTypeDef> &) {},
           [&](const parser::Statement<Indirection<parser::GenericStmt>> &y) {
             CreateGeneric(std::get<parser::GenericSpec>(y.statement.value().t));
           },

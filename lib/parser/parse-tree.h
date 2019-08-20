@@ -261,7 +261,7 @@ struct AssignedGotoStmt;
 struct PauseStmt;
 struct OpenMPConstruct;
 struct OpenMPDeclarativeConstruct;
-struct OpenMPEndLoopDirective;
+struct OmpEndLoopDirective;
 
 // Cooked character stream locations
 using Location = const char *;
@@ -513,7 +513,7 @@ struct ExecutableConstruct {
       common::Indirection<WhereConstruct>, common::Indirection<ForallConstruct>,
       common::Indirection<CompilerDirective>,
       common::Indirection<OpenMPConstruct>,
-      common::Indirection<OpenMPEndLoopDirective>>
+      common::Indirection<OmpEndLoopDirective>>
       u;
 };
 
@@ -3468,17 +3468,28 @@ struct OmpClauseList {
 };
 
 // SECTIONS, PARALLEL SECTIONS
-WRAPPER_CLASS(OmpEndSections, std::optional<OmpNowait>);
-WRAPPER_CLASS(OmpSection, Verbatim);
-struct OpenMPSectionsConstruct {
-  TUPLE_CLASS_BOILERPLATE(OpenMPSectionsConstruct);
-  std::tuple<Verbatim, OmpClauseList, Block, OmpEndSections> t;
+struct OmpSectionsDirective {
+  ENUM_CLASS(Directive, Sections, ParallelSections);
+  WRAPPER_CLASS_BOILERPLATE(OmpSectionsDirective, Directive);
+  CharBlock source;
 };
 
-EMPTY_CLASS(OmpEndParallelSections);
-struct OpenMPParallelSectionsConstruct {
-  TUPLE_CLASS_BOILERPLATE(OpenMPParallelSectionsConstruct);
-  std::tuple<Verbatim, OmpClauseList, Block, OmpEndParallelSections> t;
+struct OmpBeginSectionsDirective {
+  TUPLE_CLASS_BOILERPLATE(OmpBeginSectionsDirective);
+  std::tuple<OmpSectionsDirective, OmpClauseList> t;
+};
+struct OmpEndSectionsDirective {
+  TUPLE_CLASS_BOILERPLATE(OmpEndSectionsDirective);
+  std::tuple<OmpSectionsDirective, OmpClauseList> t;
+};
+
+WRAPPER_CLASS(OmpSectionBlocks, std::list<Block>);
+
+struct OpenMPSectionsConstruct {
+  TUPLE_CLASS_BOILERPLATE(OpenMPSectionsConstruct);
+  std::tuple<OmpBeginSectionsDirective, OmpSectionBlocks,
+      OmpEndSectionsDirective>
+      t;
 };
 
 // OpenMP directive beginning or ending a block
@@ -3698,12 +3709,14 @@ struct OpenMPStandaloneConstruct {
       u;
 };
 
-// DO / DO SIMD
-WRAPPER_CLASS(OmpEndDoSimd, std::optional<OmpNowait>);
-WRAPPER_CLASS(OmpEndDo, std::optional<OmpNowait>);
-struct OpenMPEndLoopDirective {
-  UNION_CLASS_BOILERPLATE(OpenMPEndLoopDirective);
-  std::variant<OmpEndDoSimd, OmpEndDo, OmpLoopDirective> u;
+struct OmpBeginLoopDirective {
+  TUPLE_CLASS_BOILERPLATE(OmpBeginLoopDirective);
+  std::tuple<OmpLoopDirective, OmpClauseList> t;
+};
+
+struct OmpEndLoopDirective {
+  TUPLE_CLASS_BOILERPLATE(OmpEndLoopDirective);
+  std::tuple<OmpLoopDirective, OmpClauseList> t;
 };
 
 struct OmpBeginBlockDirective {
@@ -3723,15 +3736,18 @@ struct OpenMPBlockConstruct {
 
 struct OpenMPLoopConstruct {
   TUPLE_CLASS_BOILERPLATE(OpenMPLoopConstruct);
-  std::tuple<OmpLoopDirective, OmpClauseList> t;
+  OpenMPLoopConstruct(OmpBeginLoopDirective &&a)
+    : t({std::move(a), std::nullopt, std::nullopt}) {}
+  std::tuple<OmpBeginLoopDirective, std::optional<DoConstruct>,
+      std::optional<OmpEndLoopDirective>>
+      t;
 };
 
 struct OpenMPConstruct {
   UNION_CLASS_BOILERPLATE(OpenMPConstruct);
   std::variant<OpenMPStandaloneConstruct, OpenMPSectionsConstruct,
-      OpenMPParallelSectionsConstruct, OpenMPLoopConstruct,
-      OpenMPBlockConstruct, OpenMPAtomicConstruct, OpenMPCriticalConstruct,
-      OmpSection>
+      OpenMPLoopConstruct, OpenMPBlockConstruct, OpenMPAtomicConstruct,
+      OpenMPCriticalConstruct>
       u;
 };
 }
